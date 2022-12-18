@@ -1,0 +1,183 @@
+/*
+BigQuery - GP
+*/
+
+
+/* initi*/
+DECLARE AS_OF_DATE DATE;
+SET AS_OF_DATE = '2022-09-30';
+
+/*Base Table with Date and INV ID filters*/
+WITH base_table AS(
+SELECT
+  *
+FROM
+  `wh-dev-project.rsz.AV_ALLOCATED_LEDGER_20221013` /* `wh-dev-project.rsz.AV_ALLOCATED_LEDGER` */
+WHERE
+  POSTING_DATE <= AS_OF_DATE
+  AND investor_number IN ('INV0374','INV0003','INV0058','INV0166','INV0280','INV0451')
+),
+
+/* This is to calc Capital Contributions */
+Cap_Cont AS(
+SELECT
+  investor_number
+  , investor_name
+  , -ROUND(SUM(amount_ccy),0) AS Capital_Contributions
+FROM
+  Base_Table
+WHERE
+  ( (gl_account_number BETWEEN 31030 AND 31050)
+      OR(gl_account_number BETWEEN 31150 AND 31500)
+      OR(gl_account_number = 31600))
+
+GROUP BY
+  investor_number, investor_name
+),
+
+/* This is to calc Return of Excess Capital */
+ RET_EXCESS_CAP AS(
+  SELECT
+  investor_number
+  , investor_name
+  , -ROUND(SUM(amount_ccy),0) Return_of_Excess_Capital
+FROM
+  Base_Table
+WHERE
+  ( (gl_account_number = 31100))
+
+GROUP BY
+  investor_number, investor_name
+),
+
+/* This is to calc Late Interest */
+Late_Interest_table AS(
+  SELECT
+  investor_number
+  , investor_name
+  , -ROUND(SUM(AMOUNT_CCY),0) Late_Interest
+FROM
+  base_table
+WHERE
+  ( (gl_account_number IN (31550,34350) ))
+
+GROUP BY
+  investor_number, investor_name
+),
+
+/* This is to calc Recallable Distributions */
+Recal_Distr AS(
+  SELECT
+  investor_number
+  , investor_name
+  , -ROUND(SUM(AMOUNT_CCY),0) Recallable_Distributions
+FROM
+  base_table
+WHERE 
+  ( (gl_account_number BETWEEN 34100 AND 34110 ))
+
+GROUP BY
+  investor_number, investor_name
+),
+
+/* This is to calc Non-Recallable Recycled */
+Non_Reca_Recycled AS(
+SELECT
+  investor_number
+  , investor_name
+  , -ROUND(SUM(AMOUNT_CCY),0) Non_Recallable_Recycled
+FROM
+  base_table
+WHERE 
+  ( (gl_account_number = 34120 ))
+
+GROUP BY
+  INVESTOR_NUMBER, investor_name
+),
+
+
+/*  ENDING BALANCE  */
+CAPACTBAL AS(
+SELECT
+  investor_number
+  , ROUND(SUM(AMOUNT_CCY),0) CAP_ACT_BAL
+FROM
+  Base_Table
+WHERE
+  gl_account_number IN (38100,38400,38500,38600,38700,31030,31050,31100,31200,31250,31300,31350,31450,31460,31500,31510,31600,31650,31660,31700,31750,31800,34050,34100,34110,34120,34130,34150,34200,34205,34210,34250,34300,34351,34352,34400,34500,34620,34650,34660,61375,61450,61100,61300,61350,61600,61700,61800,61850,61900,63250,63100,63500,63600,63700,63800,42100,41200,41050,41100,41105,41150,41300,42050,42200,42250,50201,51901,51902,50101,50301,50302,50303,50304,50305,50306,50307,50308,50309,50310,50401,50402,50403,50406,50407,50409,50410,50502,50503,50505,50507,50508,50509,50510,50514,50515,50518,50519,50520,50521,50522,50523,50524,50525,50526,50601,50602,50603,50604,50605,50606,50607,50608,50609,50611,50612,50613,50614,50615,50616,50617,50618,50619,50620,50621,50622,50623,50701,50702,50703,50704,50705,50706,50801,50802,50803,50804,50805,50806,50807,50901,50902,51001,51002,51101,51102,51103,51201,51202,51203,51204,51303,51401,51402,51601,51602,51603,51604,51701,51702,51801,51802,51803,51804,52001,52002,44100,61400,63200,38200,38300,63300)
+GROUP BY
+  investor_number  
+
+),
+
+
+/*  DISTRIBUTIONS  */
+DISTRIB AS(
+SELECT
+  investor_number
+  , -ROUND(SUM(AMOUNT_CCY),0) Distribution
+FROM
+  Base_Table
+WHERE
+  gl_account_number IN (34050,34100,34110,34120,34130,34150,34200,34205,34210,34250,34300,34351,34352,34400,34500,34620,34650,34660)
+GROUP BY
+  investor_number  
+
+),
+
+/*  Carried Interest:PERFORMANCE  */
+Carried AS(
+SELECT
+  investor_number
+  , -ROUND(SUM(AMOUNT_CCY),0) Carried_Interest
+FROM
+  Base_Table
+WHERE
+  gl_account_number IN (38200, 38300, 63300)
+GROUP BY
+  investor_number  
+
+)
+
+
+
+SELECT
+  cc.investor_number
+  , cc.investor_name
+  , cc.capital_contributions
+  , rec.return_of_excess_capital
+  , lat.late_interest
+  , dis.Distribution
+  , crr.Carried_Interest
+  , cab.CAP_ACT_BAL
+  , rd.recallable_distributions
+  , nrr.non_recallable_recycled
+
+FROM
+  cap_cont cc 
+FULL JOIN 
+  RET_EXCESS_CAP rec
+ON rec.investor_number = cc.investor_number  
+FULL JOIN
+  Late_Interest_table lat
+ON lat.investor_number = cc.investor_number
+FULL JOIN
+  Recal_Distr rd
+ON rd.investor_number = cc.investor_number
+FULL JOIN 
+  Non_Reca_Recycled nrr
+ON nrr.investor_number = cc.investor_number
+FULL JOIN
+CAPACTBAL cab
+ON cab.investor_number = cc.investor_number
+FULL JOIN
+DISTRIB dis
+ON dis.investor_number = cc.investor_number
+FULL JOIN
+Carried crr
+ON crr.investor_number = cc. investor_number
+
+ORDER BY cc.investor_name;
+
+/* test for late interest discripencay*/
+
